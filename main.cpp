@@ -5,21 +5,15 @@
 #include <map>
 #include <iostream>
 
-struct Point {
-    std::vector<double> coordinates;
-};
+#include "include/page_rounting.hpp"
 
-double distance(const Point& a, const Point& b) {
-    // ... existing code ...
-}
+#include "include/point.hpp"
 
-class SimpleGraphANN {
-    // ... existing code ...
-};
+
 
 int main() {
     // Create a vector of points
-    std::vector<Point> points;
+    std::vector<point> points;
     
     // Fill the vector with random points
     std::random_device rd;
@@ -27,7 +21,7 @@ int main() {
     std::uniform_real_distribution<> distr(-100.0, 100.0);
     
     for (int i = 0; i < 1000; ++i) {
-        Point point;
+        point point;
         for (int j = 0; j < 10; ++j) {  // Create 10-dimensional points
             point.coordinates.push_back(distr(gen));
         }
@@ -35,10 +29,10 @@ int main() {
     }
     
     // Create the SimpleGraphANN
-    SimpleGraphANN ann(points);
+    page_routing ann(points);
 
     // Generate a random query point
-    Point query_point;
+    point query_point;
     for (int j = 0; j < 10; ++j) {
         query_point.coordinates.push_back(distr(gen));
     }
