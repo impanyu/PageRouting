@@ -4,27 +4,14 @@
 #include <random>
 #include <map>
 
-struct Point {
-    std::vector<double> coordinates;
-};
+#include "include/page_rounting.hpp"
+#include "include/distance.hpp"
+#include "include/point.hpp"
 
-double distance(const Point& a, const Point& b) {
-    double dist = 0.0;
-    for (size_t i = 0; i < a.coordinates.size(); ++i) {
-        double diff = a.coordinates[i] - b.coordinates[i];
-        dist += diff * diff;
-    }
-    return std::sqrt(dist);
-}
 
-// Simple Graph-based ANN
-class SimpleGraphANN {
-private:
-    std::vector<Point> points;
-    std::map<int, std::vector<int>> graph;  // The adjacency list representation of the graph
 
-public:
-    SimpleGraphANN(const std::vector<Point>& points) : points(points) {
+//Implementation of page_routing
+page_routing::page_routing(const std::vector<point>& points) : points(points) {
         // Construct the graph by linking each point to its closest other point
         for (int i = 0; i < points.size(); ++i) {
             double min_dist = std::numeric_limits<double>::max();
@@ -45,7 +32,8 @@ public:
         }
     }
 
-    int query(const Point& query_point) {
+
+int page_routing::query(const point& query_point) {
         // Start from a random point in the dataset
         std::random_device rd;
         std::mt19937 gen(rd());
@@ -69,4 +57,4 @@ public:
         // Return the closest point index
         return current_point_index;
     }
-};
+

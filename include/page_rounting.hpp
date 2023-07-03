@@ -6,16 +6,20 @@
 
 #include "point.hpp"
 
-// 
+
 class page_routing {
 private:
     std::vector<point> points;
-    std::map<int, std::vector<int>> graph;  // The adjacency list representation of the graph
+    std::map<int, std::vector<int>> graph;  // The adjacency list representation of the page graph
 
 public:
-    page_routing(const std::vector<point>& points) : points(points);
+    page_routing(const std::vector<point>& points);
 
-    void insert(const point& query_point);
+    page_routing(){};
+
+    bool insert(const point& query_point);
+
+    void remove(const point& removed_point);
 
     int query(const point& query_point);
 };

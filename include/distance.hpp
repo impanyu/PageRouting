@@ -1,4 +1,5 @@
 #include "point.hpp"
+#include <cmath>
 
 double distance(const point& a, const point& b) {
     double dist = 0.0;
