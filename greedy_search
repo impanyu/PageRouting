@@ -1,0 +1,132 @@
+import numpy as np
+import heapq
+import json
+
+
+class Node:
+    def __init__(self, vector, max_neighbors=50):
+        self.vector = vector
+        self.max_neighbors = max_neighbors
+        self.neighbors = []
+
+    def add_neighbor(self, new_neighbor):
+        self.neighbors.append(new_neighbor)
+        if len(self.neighbors) > self.max_neighbors:
+            self.prune_neighbors()
+
+    def add_neighbors(self, new_neighbors):
+        self.neighbors = self.neighbors + new_neighbors
+        if self.neighbors > self.max_neighbors:
+            self.prune_neighbors()
+    
+    def prune_neighbors(self):
+        self.neighbors = self.neighbors[:self.max_neighbors]
+
+    def remove_neighbor(self, neighbor):
+        self.neighbors.remove(neighbor)
+        
+    def get_neighbors(self):
+        return self.neighbors
+
+class Graph:
+    def __init__(self, data):
+        self.data = data
+        self.graph = self.construct_graph()
+
+    def construct_graph(self):
+        graph = {}
+        for idx, vector in enumerate(self.data):
+            distances = np.linalg.norm(self.data - vector, axis=1)
+            neighbors_idx = get_neighbors(idx, self.data, distances, self.k)
+            graph[idx] = neighbors_idx
+        return graph
+
+    def get_neighbors(self, idx):
+        return self.graph[idx]
+
+
+    
+
+
+class Page_Index:
+    def __init__(self, dim, max_neighbors, index_file, node_locations_file, k=5, L=50, max_visits=1000, nodes_per_page=20):
+        self.k = k
+        self.L = L
+        self.max_visits = max_visits
+        self.dim = dim
+        self.max_neighbors = max_neighbors
+        self.index_file = index_file
+        self.node_locations_file = node_locations_file
+        self.nodes_per_page = nodes_per_page
+
+        self.number_of_nodes = 0
+        self.number_of_pages = 0
+        
+        self.node_locations = {}
+        with open(self.node_locations_file, 'r') as f:
+            self.node_locations = json.load(f)
+
+    def insert_node(self, vector):
+        self.node_locations[idx] = node
+        with open(self.node_locations_file, 'w') as f:
+            json.dump(self.node_locations, f)
+
+    #def construct_index(self):
+
+    #def 
+
+
+    def greedy_search(self, query_vector, start_node, k, L, max_visits):
+        # This priority queue will keep track of nodes to visit
+        # Format is (distance, node)
+        to_visit = [(0, start_node)]
+        visited = set() # Keep track of visited nodes
+        best_distance = float('inf')
+        best_node = None
+
+        num_visits = 0
+
+        while to_visit and num_visits < max_visits:
+            distance, current_node = heapq.heappop(to_visit)
+            
+            # If we've already visited this node, continue
+            if current_node in visited:
+                continue
+
+            # Mark this node as visited
+            visited.add(current_node)
+
+            # Add neighbors to the to_visit queue
+            neighbors = self.graph[current_node]
+            for neighbor in neighbors:
+                neighbor_distance = np.linalg.norm(query_vector - neighbor['vector'])
+                heapq.heappush(to_visit, (neighbor_distance, neighbor['node']))
+
+            if len(to_visit) > L:
+                top_L = [heapq.heappop(to_visit) for _ in range(L)]
+                to_visit = top_L
+            
+
+            num_visits += 1
+
+        return [heapq.heappop(to_visit) for _ in range(k)], best_distance
+
+
+
+
+
+# Example usage
+vectors = np.array([...]) # Your input vectors
+graph = construct_graph(vectors)
+query_vector = np.array([...]) # Your query vector
+nearest_neighbors = greedy_search(graph, query_vector)
+
+
+
+
+
+# Example usage
+data = np.random.rand(1000, 128)
+query = np.random.rand(128)
+result_idx = greedy_search(query, data)
+print("Nearest neighbor index:", result_idx)
