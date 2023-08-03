@@ -7,11 +7,13 @@ import os
 
 
 class Node:
-    def __init__(self, vector, node_id, max_neighbors=50):
+    def __init__(self, vector, node_id,page_index, max_neighbors=50, alpha=1.2):
         self.vector = vector #list of floating point numbers
         self.node_id = node_id
         self.max_neighbors = max_neighbors
         self.neighbor_ids = []
+        self.alpha = alpha
+        self.page_index = page_index
 
     def add_neighbor(self, new_neighbor_id):
         self.neighbor_ids.append(new_neighbor_id)
@@ -19,16 +21,50 @@ class Node:
             self.prune_neighbors()
 
     def add_neighbors(self, new_neighbor_ids):
-        self.neighbor_ids = self.neighbors + new_neighbor_ids
+        self.neighbor_ids = self.neighbor_ids + new_neighbor_ids
         if self.neighbor_ids > self.max_neighbors:
             self.prune_neighbors()
 
-    # to be implemented
+    def find_nearest_neighbors(self):
+
+        priority_queue = []
+        for neighbor_id in self.neighbor_ids:
+            neighbor = self.page_index.get_node(neighbor_id)
+            if neighbor is None:
+                continue
+            distance = self.distance(neighbor.get_vector())
+            heapq.heappush(priority_queue, (distance, neighbor_id))
+        distance, nearest_neighbor_id = heapq.heappop(priority_queue)
+    
+    #TODO to be implemented
     def prune_neighbors(self):
-        self.neighbor_ids = self.neighbor_ids[:self.max_neighbors]
+        neighbor_ids = []
+        while len(self.neighbor_ids) > 0:
+            distance, nearest_neighbor_id = self.find_nearest_neighbors()
+            nearest_neighbor = self.page_index.get_node(nearest_neighbor_id)
+            neighbor_ids.append(nearest_neighbor_id)
+            if len(neighbor_ids) >= self.max_neighbors:
+                break
+
+            for i in range(len(self.neighbor_ids)-1,-1,-1):
+                neighbor_id = self.neighbor_ids[i]
+                neighbor = self.get_node(neighbor_id)
+                if neighbor is None:
+                    self.neighbor_ids.remove(neighbor_id)
+                    continue
+
+                distance_1 = nearest_neighbor.distance(neighbor.get_vector())
+                distance_2 = self.distance(neighbor.get_vector())
+
+                if self.alpha * distance_1 < distance_2:
+                    self.neighbor_ids.remove(neighbor_id)
+     
+  
+        self.neighbor_ids = neighbor_ids
 
     def remove_neighbor(self, neighbor_id):
-        self.neighbor_ids.remove(neighbor_id)
+        if neighbor_id in self.neighbor_ids:
+            self.neighbor_ids.remove(neighbor_id)
         
     def get_neighbor_ids(self):
         return self.neighbor_ids
@@ -40,7 +76,7 @@ class Node:
         return self.node_id
     
     def distance(self, other_vector):
-        return np.linalg.norm(self.vector - other_vector)
+        return np.linalg.norm(np.array(self.vector) - np.array(other_vector))
     
 
 class Page:
@@ -119,7 +155,7 @@ class Page_Index:
         self.node_ids = {}
         self.page_buffers = []
 
-        self.changed_pages = []
+        self.changed_pages = {}
 
         self.page_buffers_size = page_buffer_size
 
@@ -172,7 +208,10 @@ class Page_Index:
     def find_best_page(self, node):
         page_co_located_counts = {}
         for neighbor_id in node.get_neighbor_ids():
+            
             neighbor = self.get_node(neighbor_id)
+            if not neighbor:
+                continue
             neighbor_page_id = self.node_ids[neighbor_id]
             page_co_located_counts[neighbor_page_id] = page_co_located_counts.get(neighbor_page_id, 0) + 1
             if node.get_id() in neighbor.get_neighbor_ids():
@@ -191,17 +230,22 @@ class Page_Index:
     def merge_pages(self, page1, page2):
         page1.merge_page(page2)
         self.delete_page(page2.get_id())
-        self.changed_pages.append(page1)
+        self.changed_pages[page1.get_id()]=page1
 
     def dump_changed_pages(self):
-        for page in self.changed_pages:
+        for page_id in self.changed_pages:
+            page = self.changed_pages[page_id]
             with open(self.index_file, 'rb+') as f:
-                f.seek(page.get_id() *self.page_size)
+                f.seek(page_id *self.page_size)
                 for node in page.get_nodes():
                     node_data = np.append([node.get_id()], node.get_vector())
                     node_data = np.append(node_data,node.get_neighbor_ids())
                     f.write(node_data.astype(np.float32).tobytes())
-        self.changed_pages = []
+                # padding with zeros
+                if len(page.get_nodes()) < self.nodes_per_page:
+                    f.write(np.zeros(int(self.page_size/4) - len(page.get_nodes())*(self.dim+self.max_neighbors+1)).astype(np.float32).tobytes())
+
+        self.changed_pages = {}
 
     def dump_meta_data(self):
         with open(self.meta_data_file, 'w') as f:
@@ -234,7 +278,10 @@ class Page_Index:
             node_id = int(node_data[0])
             vector = list(node_data[1:self.dim])
             node_neighbors = list(node_data[self.dim:].astype(np.int32))
-            node = Node(vector, int(node_id),self.max_neighbors)
+            if node_id == -1:
+                break
+
+            node = Node(vector, int(node_id),self, self.max_neighbors)
             node.add_neighbors(node_neighbors)
 
             page.add_node(node)
@@ -255,31 +302,31 @@ class Page_Index:
     def insert_node(self, vector):
         rand_idx = random.randint(0,len(self.node_ids))
         start_node_id = list(self.node_ids.keys())[rand_idx]
-
-        
+   
         #start_node = self.get_node(start_node)
 
         top_k_node_ids,visited_node_ids = self.search(vector, start_node_id, self.k, self.L, self.max_visits)
 
         new_node_id = self.get_aviailable_node_id()
 
-        new_node = Node(vector, new_node_id, self.max_neighbors)
+        new_node = Node(vector, new_node_id, self, self.max_neighbors)
 
-        new_node.add_neighbors(top_k_node_ids)
+        new_node.add_neighbors(visited_node_ids)
 
         best_page = self.find_best_page(new_node)
 
         best_page.add_node(new_node)
 
-        self.changed_pages.append(best_page)
+        self.changed_pages[best_page.get_id()] = best_page
 
+        # split page if necessary
         if len(best_page.get_nodes()) > self.nodes_per_page:
             new_page = best_page.split_page()
             self.number_of_pages += 1
             new_page_id = self.get_available_page_id()
             new_page.page_id = new_page_id
             self.page_buffers.append(new_page)
-            self.changed_pages.append(new_page)
+            self.changed_pages[new_page_id] = new_page
 
             for node in new_page.get_nodes():
                 self.node_ids[node.get_id()] = new_page_id
@@ -289,8 +336,18 @@ class Page_Index:
 
         self.node_ids[new_node_id] = best_page.get_id()
 
-    #TODO: this function is not complete
-    #in some case delete_node may not delete the link pointing to the deleted node, so delete node may still be in the neighbor list of other nodes
+        # add the new node to the neighbor list of the neighbors
+        for neighbor_id in new_node.get_neighbor_ids():
+            neighbor = self.get_node(neighbor_id)
+            neighbor_page_id = self.node_ids[neighbor_id]
+            if neighbor:
+                neighbor.add_neighbor(new_node_id)
+                self.changed_pages[neighbor_page_id] = self.get_page(neighbor_page_id)
+
+
+
+   
+    #in some case delete_node may not delete the link pointing to the deleted node, so deleted node may still be in the neighbor list of other nodes
     def delete_node(self, node_id):
         if node_id not in self.node_ids:
             return 
@@ -298,20 +355,27 @@ class Page_Index:
         page = self.get_page(page_id)
         node = page.get_node_by_id(node_id)
         page.remove_node(node)
-        self.changed_pages.append(page)
+        self.changed_pages[page_id] = page
         self.node_ids.pop(node_id,None)
         self.available_node_ids.insert(0,node_id)
 
+        # iterate through all the neighbors of the node and remove the node from their neighbor list
+        # also add the neighbors of the node to the neighbor list of the neighbors to perserve the links: when a->delete_node and delete_node -> b, we add a->b
         for neighbor_id in node.get_neighbor_ids():
             neighbor = self.get_node(neighbor_id)
-            neighbor.remove_neighbor(node_id)
-            #self.changed_pages.append(page) 
-            #TODO: self.changed_pages and self.page_buffers should be modified to set instead of list
-            #when a->delete_node and delete_node -> b, we add a->b
+            if not neighbor:
+                continue
+            neighbor_page = self.get_page(self.node_ids[neighbor_id])
             
+            if node_id in neighbor.get_neighbor_ids():
+                neighbor.remove_neighbor(node_id)
+                other_neighbor_ids =[other_neighbor_id for other_neighbor_id in node.get_neighbor_ids() if other_neighbor_id != neighbor_id]
+                neighbor.add_neighbors(other_neighbor_ids)
+            
+                self.changed_pages[self.node_ids[neighbor_id]] = neighbor_page
 
-        
-
+     
+           
     def search(self, query_vector, start_node_id, k, L, max_visits):
         # This priority queue will keep track of nodes to visit
         # Format is (distance, node)
@@ -341,6 +405,10 @@ class Page_Index:
             neighbor_ids = current_node.get_neighbor_ids()
 
             for neighbor_id in neighbor_ids:
+                if neighbor_id not in visited:
+                    continue
+                if neighbor_id not in self.node_ids:
+                    continue
                 neighbor_page_id = self.node_ids[neighbor_id]
                 ioed_pages.add(neighbor_page_id)
                 if len(ioed_pages) > self.max_ios_per_hop:
