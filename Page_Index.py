@@ -3,6 +3,7 @@ import heapq
 import json
 import networkx as nx
 import random
+import os
 
 
 class Node:
@@ -55,6 +56,10 @@ class Page:
     def add_nodes(self, new_nodes):
         self.nodes = self.nodes + new_nodes
 
+    def merge_page(self, page):
+        for node in page.get_nodes():
+            self.add_node(node)
+
     # this function splits the page into two pages and returns the new page
     def split_page(self):
         G = nx.DiGraph()
@@ -95,24 +100,10 @@ class Page:
         return None
 
 
-class Graph:
-    def __init__(self, data):
-        self.data = data
-        self.graph = self.construct_graph()
 
-    def construct_graph(self):
-        graph = {}
-        for idx, vector in enumerate(self.data):
-            distances = np.linalg.norm(self.data - vector, axis=1)
-            neighbors_idx = get_neighbors(idx, self.data, distances, self.k)
-            graph[idx] = neighbors_idx
-        return graph
-
-
- 
 
 class Page_Index:
-    def __init__(self, dim, max_neighbors, index_file, node_ids_file, k=5, L=50, max_visits=1000, nodes_per_page=20, page_buffer_size=100, max_ios_per_hop = 3):
+    def __init__(self, dim, max_neighbors, index_file, meta_data_file, k=5, L=50, max_visits=1000, nodes_per_page=20, page_buffer_size=100, max_ios_per_hop = 3):
         self.k = k
         self.L = L
         self.max_visits = max_visits
@@ -120,7 +111,7 @@ class Page_Index:
         self.max_neighbors = max_neighbors
 
         self.index_file = index_file
-        self.node_ids_file = node_ids_file
+        self.meta_data_file = meta_data_file
 
         self.nodes_per_page = nodes_per_page
         self.number_of_pages = 0
@@ -136,21 +127,71 @@ class Page_Index:
 
         self.max_ios_per_hop = max_ios_per_hop
 
-        with open(self.node_ids_file, 'r') as f:
-            self.node_ids = json.load(f)
+        try:
+            if os.path.exists(self.meta_data_file):
+                with open(self.meta_data_file, 'r') as f:
+                    
+                    self.meta_data = json.load(f)
+                    self.node_ids = self.meta_data['node_ids']
+                    self.available_page_ids = self.meta_data['available_page_ids']
+                    self.available_node_ids = self.meta_data['available_node_ids']
+            else:
+                self.node_ids = {}
+                self.available_page_ids = [0]
+                self.available_node_ids = [0]
+                self.meta_data = {'node_ids':self.node_ids, 'available_page_ids':self.available_page_ids, 'available_node_ids':self.available_node_ids}
+                with open(self.meta_data_file, 'w') as f:
+                    json.dump(self.meta_data, f)
+
+                with open(self.index_file, 'wb') as f:
+                    f.write(np.array([]).tobytes())
+
+        except Exception as e:
+            print(f"An error occurred: {e}")
+
+    def delete_page(self,page_id):
+        self.available_page_ids.insert(0,page_id)
+                
 
     def get_available_page_id(self):
-        pass
+        if len(self.available_page_ids) == 0:
+            self.available_page_ids[0] += 1
+            return self.available_page_ids[0] - 1
+        else:
+            return self.available_page_ids.pop(0)
+            
 
     def get_aviailable_node_id(self):
-        pass
+        if len(self.available_node_ids) == 0:
+            self.available_node_ids[0] += 1
+            return self.available_node_ids[0] - 1
+        else:
+            return self.available_node_ids.pop(0)
 
     #find best page to insert the node
     def find_best_page(self, node):
-        pass
-
+        page_co_located_counts = {}
+        for neighbor_id in node.get_neighbor_ids():
+            neighbor = self.get_node(neighbor_id)
+            neighbor_page_id = self.node_ids[neighbor_id]
+            page_co_located_counts[neighbor_page_id] = page_co_located_counts.get(neighbor_page_id, 0) + 1
+            if node.get_id() in neighbor.get_neighbor_ids():
+                page_co_located_counts[neighbor_page_id] = page_co_located_counts.get(neighbor_page_id, 0) + 1
+        
+        max_page_co_located_count = 0
+        for page_id in page_co_located_counts.keys():
+            page_co_located_count = page_co_located_counts[page_id]
+            if page_co_located_count > max_page_co_located_count:
+                max_page_co_located_count = page_co_located_count
+                best_page_id = page_id
+        
+        return self.get_page(best_page_id)
+                
+            
     def merge_pages(self, page1, page2):
-        pass
+        page1.merge_page(page2)
+        self.delete_page(page2.get_id())
+        self.changed_pages.append(page1)
 
     def dump_changed_pages(self):
         for page in self.changed_pages:
@@ -160,10 +201,11 @@ class Page_Index:
                     node_data = np.append([node.get_id()], node.get_vector())
                     node_data = np.append(node_data,node.get_neighbor_ids())
                     f.write(node_data.astype(np.float32).tobytes())
+        self.changed_pages = []
 
-    def dump_node_ids(self):
-        with open(self.node_ids_file, 'w') as f:
-            json.dump(self.node_ids, f)
+    def dump_meta_data(self):
+        with open(self.meta_data_file, 'w') as f:
+            json.dump(self.meta_data, f)
 
 
     def get_page(self,page_id):
@@ -204,6 +246,8 @@ class Page_Index:
         return page
     
     def get_node(self, node_id):
+        if node_id not in self.node_ids:
+            return None
         page_id = self.node_ids[node_id]
         page = self.get_page(page_id)
         return page.get_node_by_id(node_id)
@@ -245,8 +289,28 @@ class Page_Index:
 
         self.node_ids[new_node_id] = best_page.get_id()
 
+    #TODO: this function is not complete
+    #in some case delete_node may not delete the link pointing to the deleted node, so delete node may still be in the neighbor list of other nodes
     def delete_node(self, node_id):
-        pass
+        if node_id not in self.node_ids:
+            return 
+        page_id = self.node_ids[node_id]
+        page = self.get_page(page_id)
+        node = page.get_node_by_id(node_id)
+        page.remove_node(node)
+        self.changed_pages.append(page)
+        self.node_ids.pop(node_id,None)
+        self.available_node_ids.insert(0,node_id)
+
+        for neighbor_id in node.get_neighbor_ids():
+            neighbor = self.get_node(neighbor_id)
+            neighbor.remove_neighbor(node_id)
+            #self.changed_pages.append(page) 
+            #TODO: self.changed_pages and self.page_buffers should be modified to set instead of list
+            #when a->delete_node and delete_node -> b, we add a->b
+            
+
+        
 
     def search(self, query_vector, start_node_id, k, L, max_visits):
         # This priority queue will keep track of nodes to visit
@@ -298,19 +362,19 @@ class Page_Index:
 
 
 
+if __name__ == '__main__':
 
-# Example usage
-vectors = np.array([...]) # Your input vectors
-graph = construct_graph(vectors)
-query_vector = np.array([...]) # Your query vector
-nearest_neighbors = greedy_search(graph, query_vector)
+    page_index = Page_Index(100, 50, 'index.bin', 'node_ids.json')
+    #load data from hdf5 file
 
 
 
 
+    # Example usage
+    vectors = np.array([...]) # Your input vectors
+    graph = construct_graph(vectors)
+    query_vector = np.array([...]) # Your query vector
+    nearest_neighbors = greedy_search(graph, query_vector)
 
-# Example usage
-data = np.random.rand(1000, 128)
-query = np.random.rand(128)
-result_idx = greedy_search(query, data)
-print("Nearest neighbor index:", result_idx)
+
+
