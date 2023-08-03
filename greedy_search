@@ -7,7 +7,7 @@ import random
 
 class Node:
     def __init__(self, vector, node_id, max_neighbors=50):
-        self.vector = vector
+        self.vector = vector #list of floating point numbers
         self.node_id = node_id
         self.max_neighbors = max_neighbors
         self.neighbor_ids = []
@@ -128,6 +128,8 @@ class Page_Index:
         self.node_ids = {}
         self.page_buffers = []
 
+        self.changed_pages = []
+
         self.page_buffers_size = page_buffer_size
 
         self.page_size = (self.nodes_per_page * (self.dim+self.max_neighbors+1))* 4
@@ -136,6 +138,33 @@ class Page_Index:
 
         with open(self.node_ids_file, 'r') as f:
             self.node_ids = json.load(f)
+
+    def get_available_page_id(self):
+        pass
+
+    def get_aviailable_node_id(self):
+        pass
+
+    #find best page to insert the node
+    def find_best_page(self, node):
+        pass
+
+    def merge_pages(self, page1, page2):
+        pass
+
+    def dump_changed_pages(self):
+        for page in self.changed_pages:
+            with open(self.index_file, 'rb+') as f:
+                f.seek(page.get_id() *self.page_size)
+                for node in page.get_nodes():
+                    node_data = np.append([node.get_id()], node.get_vector())
+                    node_data = np.append(node_data,node.get_neighbor_ids())
+                    f.write(node_data.astype(np.float32).tobytes())
+
+    def dump_node_ids(self):
+        with open(self.node_ids_file, 'w') as f:
+            json.dump(self.node_ids, f)
+
 
     def get_page(self,page_id):
         for page in self.page_buffers: 
@@ -160,9 +189,9 @@ class Page_Index:
 
         for i in range(self.nodes_per_page):
             node_data = page_data[i*(self.dim+self.max_neighbors+1):(i+1)*(self.dim+self.max_neighbors+1)]
-            node_id = node_data[:1]
-            vector = node_data[1:self.dim]
-            node_neighbors = node_data[self.dim:]
+            node_id = int(node_data[0])
+            vector = list(node_data[1:self.dim])
+            node_neighbors = list(node_data[self.dim:].astype(np.int32))
             node = Node(vector, int(node_id),self.max_neighbors)
             node.add_neighbors(node_neighbors)
 
@@ -188,15 +217,36 @@ class Page_Index:
 
         top_k_node_ids,visited_node_ids = self.search(vector, start_node_id, self.k, self.L, self.max_visits)
 
+        new_node_id = self.get_aviailable_node_id()
 
+        new_node = Node(vector, new_node_id, self.max_neighbors)
 
-        with open(self.node_locations_file, 'w') as f:
-            json.dump(self.node_locations, f)
+        new_node.add_neighbors(top_k_node_ids)
 
-    #def construct_index(self):
+        best_page = self.find_best_page(new_node)
 
-    #def 
+        best_page.add_node(new_node)
 
+        self.changed_pages.append(best_page)
+
+        if len(best_page.get_nodes()) > self.nodes_per_page:
+            new_page = best_page.split_page()
+            self.number_of_pages += 1
+            new_page_id = self.get_available_page_id()
+            new_page.page_id = new_page_id
+            self.page_buffers.append(new_page)
+            self.changed_pages.append(new_page)
+
+            for node in new_page.get_nodes():
+                self.node_ids[node.get_id()] = new_page_id
+            
+            for node in best_page.get_nodes():
+                self.node_ids[node.get_id()] = best_page.get_id()
+
+        self.node_ids[new_node_id] = best_page.get_id()
+
+    def delete_node(self, node_id):
+        pass
 
     def search(self, query_vector, start_node_id, k, L, max_visits):
         # This priority queue will keep track of nodes to visit
